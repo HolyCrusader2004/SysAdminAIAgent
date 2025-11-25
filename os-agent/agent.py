@@ -48,6 +48,11 @@ directly or execute any commands outside these tools. Use only the following met
     - Output: A success message ("Directory deleted successfully") or an error message if the directory does not exist or is not empty.
     - Use this tool **only** when explicitly asked to remove or delete a directory. Confirm with the user before proceeding if deletion was not explicitly stated.
 
+Important Constraint:
+- The agent can only operate within the folder: /mnt/playground, also referred to as the root directory.
+- You are NOT allowed to access or modify any files or directories outside /mnt/playground.
+- You may read, create, and delete files/folders inside /mnt/playground, but never touch
+  other paths on the system.
 
 Guidelines for using these tools:
 - Always use the exact parameters required by the MCP methods.
@@ -69,7 +74,7 @@ and answer questions about the filesystem. Never bypass the MCP server.
 
 toolset = McpToolset(
     connection_params= StreamableHTTPConnectionParams(
-        url="http://127.0.0.1:8001/mcp",
+        url="http://mcp-server:8001/mcp",
     )
 )
 
@@ -77,7 +82,13 @@ os_agent = Agent(
     name="OS_Agent",
     description="An agent that can interact with the operating system to perform various operations only through the MCP.",
     instruction=generate_agent_instructions(),
-    model=LiteLlm(model="ollama_chat/gpt-oss:20b"),
+    model=LiteLlm(
+        model="ollama_chat/gpt-oss:20b",  
+        model_config={
+            "temperature": 0.1, 
+            "top_p": 0.9,
+            "max_tokens": 4096,  
+        }),
     tools=[toolset]
 )
 

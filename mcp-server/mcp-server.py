@@ -1,11 +1,14 @@
+import sys
 import asyncio
-asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
+if sys.platform.startswith("win"):
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    
 from mcp.server.fastmcp import FastMCP
 import os
 from pathlib import Path
 
-mcp = FastMCP("OS-Agent-MCP-Server", port=8001)
+mcp = FastMCP("OS-Agent-MCP-Server", host="0.0.0.0", port=8001)
 
 @mcp.tool()
 def list_directory(dir_path: str) -> list[str]:
