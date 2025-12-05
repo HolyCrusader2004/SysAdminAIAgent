@@ -34,6 +34,17 @@ services:
     volumes:
       - ./mcp-server:/app/mcp-server
       - D:/ASO/aso-project/playground:/mnt/playground
+    environment:
+      - HOST=mcp-server
+      - PORT=8001
+      - MOUNT_PATH=/mcp
+      - AUTH_HOST=keycloak      
+      - AUTH_PORT=8080
+      - AUTH_REALM=master
+      - OAUTH_CLIENT_ID=mcp_server
+      - OAUTH_CLIENT_SECRET=i94YxgUaNqoqLsNo3pUjZoKDwd5b41Bx
+      - MCP_SCOPE=mcp:tools
+      - TRANSPORT=streamable-http
 
   adk-web:
     build:
@@ -51,6 +62,19 @@ services:
       - ./:/app:ro        
     working_dir: /app      
     restart: unless-stopped
+  
+  keycloak:
+    image: quay.io/keycloak/keycloak:21.1.1
+    container_name: keycloak
+    environment:
+      - KEYCLOAK_ADMIN=admin
+      - KEYCLOAK_ADMIN_PASSWORD=admin
+    ports:
+      - "8080:8080"
+    command: start-dev
+    networks:
+      - aso-network
+
 
 networks:
   aso-network:

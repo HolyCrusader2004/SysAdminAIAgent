@@ -12,4 +12,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 EXPOSE 8001
 
-CMD ["python", "mcp-server/mcp-server.py"]
+CMD ["python", "-m", "mcp-server.mcp-server"]
+

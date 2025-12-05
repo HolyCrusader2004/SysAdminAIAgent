@@ -1,3 +1,4 @@
+import os
 from google.adk.agents import Agent
 from google.adk.models.lite_llm import LiteLlm
 from google.adk.tools.mcp_tool import (
@@ -40,47 +41,74 @@ directly or execute any commands outside these tools. Use only the following met
     - Deletes a file at the specified path.
     - Input: Exact full path of the file to delete.
     - Output: A success message ("File deleted successfully") or an error message if the file does not exist or cannot be deleted.
-    - Use this tool **only** when explicitly asked to remove or delete a file. Confirm with the user before proceeding if deletion was not explicitly stated.
+    - Use this tool **only** when explicitly asked to remove or delete a file.
 
 7. delete_folder(folder_path: str) -> str
     - Deletes an empty folder at the specified path.
     - Input: Exact full path of the directory to delete.
     - Output: A success message ("Directory deleted successfully") or an error message if the directory does not exist or is not empty.
-    - Use this tool **only** when explicitly asked to remove or delete a directory. Confirm with the user before proceeding if deletion was not explicitly stated.
+    - Use this tool **only** when explicitly asked to remove or delete a directory.
 
 Important Constraint:
 - The agent can only operate within the folder: /mnt/playground, also referred to as the root directory.
 - You are NOT allowed to access or modify any files or directories outside /mnt/playground.
-- You may read, create, and delete files/folders inside /mnt/playground, but never touch
-  other paths on the system.
 
 Guidelines for using these tools:
 - Always use the exact parameters required by the MCP methods.
-- Do not attempt to access paths outside what is necessary.
-- **Error Handling:** If a tool call returns an error (e.g., "Error: [Errno 2] No such file or directory...") for an initial path, you must immediately conclude that the path is invalid and report this finding to the user without attempting to use the tool again for that specific path.
 - Always handle errors returned by the tools gracefully.
 - Do NOT execute any OS commands, import OS modules, or read/write files directly.
 - Your reasoning should guide you to choose which MCP tool to use for each task.
-- **File and Folder Deletion Confirmation:** Before calling `delete_file` or `delete_folder`, always ensure the user explicitly requests deletion. If the request is ambiguous (e.g., "clean this folder"), ask for confirmation first: "Do you want me to delete the specified files/folders?"
-- **Ambiguous File Content Reading:** When a user asks to list the file content from a specific directory but does **not** specify recursion (e.g., "read files in /config"), you **MUST** ask for clarification first: "Do you want to read only the files directly in that directory (**non-recursive**), or all files including those in subdirectories (**recursive**)?"
-    - If the user confirms **recursive**, use `read_files_recursively(dir_path)`.
-    - If the user confirms **non-recursive** (or limits to the main folder), use `read_files_in_directory(dir_path)`.
-- **Output Formatting:** When presenting the results from `get_file_content`, `read_files_in_directory`, or `read_files_recursively`, you **MUST** format the output for readability. For each file, include the **file path as a heading** and display the file content inside a **code block** (markdown fences). This makes code and text files easy to review.
+- **File and Folder Deletion Confirmation:** Before calling `delete_file` or `delete_folder`, always ensure the user explicitly requests deletion.
+- **Ambiguous File Content Reading:** When a user asks to list the file content from a specific directory but does **not** specify recursion, ask for clarification first.
+- **Output Formatting:** When presenting the results from `get_file_content`, `read_files_in_directory`, or `read_files_recursively`, format the output for readability with file paths as headings and content in code blocks.
 
 Follow these rules strictly. Use the MCP tools to explore directories, read or delete files,
 and answer questions about the filesystem. Never bypass the MCP server.
 """
     return instructions.strip()
 
+KEYCLOAK_URL = os.getenv("KEYCLOAK_URL", "http://keycloak:8080")
+KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM", "master")
+MCP_CLIENT_ID = os.getenv("MCP_CLIENT_ID", "mcp_server")
+MCP_CLIENT_SECRET = os.getenv("MCP_CLIENT_SECRET", "i94YxgUaNqoqLsNo3pUjZoKDwd5b41Bx")
+MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://mcp-server:8001/mcp")
+
+try:
+    import httpx
+    
+    token_url = f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/token"
+    response = httpx.post(
+        token_url,
+        data={
+            "grant_type": "client_credentials",
+            "client_id": MCP_CLIENT_ID,
+            "client_secret": MCP_CLIENT_SECRET,
+            "scope": "mcp:tools"
+        },
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        timeout=10.0
+    )
+    
+    if response.status_code != 200:
+        raise Exception(f"Failed to obtain token: {response.status_code} - {response.text}")
+    
+    token_data = response.json()
+    access_token = token_data["access_token"]
+    expires_in = token_data.get("expires_in", 300)
+    
+except Exception as e:
+    raise
+
 toolset = McpToolset(
-    connection_params= StreamableHTTPConnectionParams(
-        url="http://mcp-server:8001/mcp",
+    connection_params=StreamableHTTPConnectionParams(
+        url=MCP_SERVER_URL,
+        headers={"Authorization": f"Bearer {access_token}"}  
     )
 )
 
 os_agent = Agent(
     name="OS_Agent",
-    description="An agent that can interact with the operating system to perform various operations only through the MCP.",
+    description="An agent that can interact with the operating system through MCP.",
     instruction=generate_agent_instructions(),
     model=LiteLlm(
         model="ollama_chat/gpt-oss:20b",  
@@ -88,7 +116,8 @@ os_agent = Agent(
             "temperature": 0.1, 
             "top_p": 0.9,
             "max_tokens": 4096,  
-        }),
+        }
+    ),
     tools=[toolset]
 )
 

@@ -3,33 +3,77 @@ import asyncio
 
 if sys.platform.startswith("win"):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-    
+
 from mcp.server.fastmcp import FastMCP
+from mcp.server.auth.settings import AuthSettings
+from pydantic import AnyHttpUrl
 import os
 from pathlib import Path
 
-mcp = FastMCP("OS-Agent-MCP-Server", host="0.0.0.0", port=8001)
+
+from .config import config
+from .token_verifier import IntrospectionTokenVerifier
+
+def create_oauth_urls() -> dict[str, str]:
+    """Create OAuth URLs based on configuration."""
+    auth_base = config.auth_base_url
+    
+    urls = {
+        "issuer": auth_base,
+        "introspection_endpoint": f"{auth_base}/protocol/openid-connect/token/introspect",
+        "authorization_endpoint": f"{auth_base}/protocol/openid-connect/auth",
+        "token_endpoint": f"{auth_base}/protocol/openid-connect/token",
+    }
+    
+    return urls
+
+oauth_urls = create_oauth_urls()
+
+token_verifier = IntrospectionTokenVerifier(
+    introspection_endpoint=oauth_urls["introspection_endpoint"],
+    server_url=config.server_url,
+    client_id=config.OAUTH_CLIENT_ID,
+    client_secret=config.OAUTH_CLIENT_SECRET,
+)
+
+mcp = FastMCP(
+    "OS-Agent-MCP-Server",
+    host="0.0.0.0",
+    port=config.PORT,
+    token_verifier=token_verifier,
+    auth=AuthSettings(
+        issuer_url=AnyHttpUrl(oauth_urls["issuer"]),
+        required_scopes=[config.MCP_SCOPE],
+        resource_server_url=AnyHttpUrl(config.server_url),
+    ),
+)
 
 @mcp.tool()
 def list_directory(dir_path: str) -> list[str]:
     dir_path = Path(dir_path)
     if not dir_path.is_dir():
-        return [f"Error: No such file or directory: '{dir_path}'"]
+        error_msg = f"Error: No such file or directory: '{dir_path}'"
+        return [error_msg]
     try:
-        return [item.name for item in dir_path.iterdir()]
+        items = [item.name for item in dir_path.iterdir()]
+        return items
     except Exception as e:
-        return f"Error: {e}"
-    
+        error_msg = f"Error: {e}"
+        return [error_msg]
+
 @mcp.tool()
 def get_file_content(file_path: str) -> str:
     file_path = Path(file_path)
     if not file_path.is_file():
-        return f"Error: No such file: '{file_path}'"
+        error_msg = f"Error: No such file: '{file_path}'"
+        return error_msg
     try:
         with open(file_path, 'r', encoding='utf-8') as file:
-            return file.read()
+            content = file.read()
+            return content
     except Exception as e:
-        return f"Error: {e}"
+        error_msg = f"Error: {e}"
+        return error_msg
 
 def getFilesAndDirs(path: Path, files: list[str], dirs: list[str]) -> tuple[list[str], list[str]]:
     if path.is_file():
@@ -44,19 +88,21 @@ def getFilesAndDirs(path: Path, files: list[str], dirs: list[str]) -> tuple[list
 def list_directory_recursive(dir_path: str) -> tuple[list[str], list[str]]:
     dir_path = Path(dir_path)
     if not dir_path.is_dir():
-        return [f"Error: No such file or directory: '{dir_path}'"]
+        error_msg = f"Error: No such file or directory: '{dir_path}'"
+        return ([error_msg], [])
     try:
         files, dirs = getFilesAndDirs(dir_path, [], [])
-        result = (dirs, files)
-        return result
+        return (dirs, files)
     except Exception as e:
-        return f"Error: {e}"
-    
+        error_msg = f"Error: {e}"
+        return ([error_msg], [])
+
 @mcp.tool()
 def read_files_in_directory(dir_path: str) -> dict[str, str]:
     dir_path = Path(dir_path)
     if not dir_path.is_dir():
-        return { "Error": f"No such file or directory: '{dir_path}'" }
+        return {"Error": f"No such file or directory: '{dir_path}'"}
+    
     file_contents = {}
     try:
         for entry in dir_path.iterdir():
@@ -68,13 +114,14 @@ def read_files_in_directory(dir_path: str) -> dict[str, str]:
                     file_contents[str(entry)] = f"Error: {e}"
         return file_contents
     except Exception as e:
-        return f"Error: {e}"
+        return {"Error": f"{e}"}
 
 @mcp.tool()
 def read_files_recursively(dir_path: str) -> dict[str, str]:
     dir_path = Path(dir_path)
     if not dir_path.is_dir():
-        return { "Error": f"No such file or directory: '{dir_path}'" }
+        return {"Error": f"No such file or directory: '{dir_path}'"}
+    
     file_contents = {}
     try:
         for root, _, files in os.walk(dir_path):
@@ -87,7 +134,7 @@ def read_files_recursively(dir_path: str) -> dict[str, str]:
                     file_contents[str(file_path)] = f"Error: {e}"
         return file_contents
     except Exception as e:
-        return f"Error: {e}"
+        return {"Error": f"{e}"}
 
 @mcp.tool()
 def delete_file(file_path: str) -> str:
@@ -95,9 +142,11 @@ def delete_file(file_path: str) -> str:
         return f"Error: No such file: '{file_path}'"
     try:
         os.remove(file_path)
-        return f"File '{file_path}' deleted successfully."
+        msg = f"File '{file_path}' deleted successfully."
+        return msg
     except Exception as e:
-        return f"Error: {e}"
+        error_msg = f"Error: {e}"
+        return error_msg
 
 @mcp.tool()
 def delete_folder(folder_path: str) -> str:
@@ -105,12 +154,18 @@ def delete_folder(folder_path: str) -> str:
         return f"Error: No such directory: '{folder_path}'"
     try:
         os.rmdir(folder_path)
-        return f"Directory '{folder_path}' deleted successfully."
+        msg = f"Directory '{folder_path}' deleted successfully."
+        return msg
     except Exception as e:
-        return f"Error: {e}"
-    
+        error_msg = f"Error: {e}"
+        return error_msg
+
 if __name__ == "__main__":
     try:
-        mcp.run(transport="streamable-http", mount_path="/mcp")
+        mcp.run(transport=config.TRANSPORT, mount_path=config.MOUNT_PATH)
     except ConnectionResetError:
         pass
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        sys.exit(1)
