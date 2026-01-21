@@ -10,43 +10,7 @@ from pydantic import AnyHttpUrl
 import os
 from pathlib import Path
 
-
-from .config import config
-from .token_verifier import IntrospectionTokenVerifier
-
-def create_oauth_urls() -> dict[str, str]:
-    """Create OAuth URLs based on configuration."""
-    auth_base = config.auth_base_url
-    
-    urls = {
-        "issuer": auth_base,
-        "introspection_endpoint": f"{auth_base}/protocol/openid-connect/token/introspect",
-        "authorization_endpoint": f"{auth_base}/protocol/openid-connect/auth",
-        "token_endpoint": f"{auth_base}/protocol/openid-connect/token",
-    }
-    
-    return urls
-
-oauth_urls = create_oauth_urls()
-
-token_verifier = IntrospectionTokenVerifier(
-    introspection_endpoint=oauth_urls["introspection_endpoint"],
-    server_url=config.server_url,
-    client_id=config.OAUTH_CLIENT_ID,
-    client_secret=config.OAUTH_CLIENT_SECRET,
-)
-
-mcp = FastMCP(
-    "OS-Agent-MCP-Server",
-    host="0.0.0.0",
-    port=config.PORT,
-    token_verifier=token_verifier,
-    auth=AuthSettings(
-        issuer_url=AnyHttpUrl(oauth_urls["issuer"]),
-        required_scopes=[config.MCP_SCOPE],
-        resource_server_url=AnyHttpUrl(config.server_url),
-    ),
-)
+mcp = FastMCP("OS-Agent-MCP-Server", host="0.0.0.0", port=8001)
 
 @mcp.tool()
 def list_directory(dir_path: str) -> list[str]:
@@ -64,6 +28,9 @@ def list_directory(dir_path: str) -> list[str]:
 @mcp.tool()
 def get_file_content(file_path: str) -> str:
     file_path = Path(file_path)
+    if file_path.name == "flag.txt":
+        return "Error: Access to 'flag.txt' is restricted."
+    
     if not file_path.is_file():
         error_msg = f"Error: No such file: '{file_path}'"
         return error_msg
@@ -107,6 +74,8 @@ def read_files_in_directory(dir_path: str) -> dict[str, str]:
     try:
         for entry in dir_path.iterdir():
             if entry.is_file():
+                if entry.name == "flag.txt":
+                    continue
                 try:
                     with open(entry, 'r', encoding='utf-8') as file:
                         file_contents[str(entry)] = file.read()
@@ -127,6 +96,8 @@ def read_files_recursively(dir_path: str) -> dict[str, str]:
         for root, _, files in os.walk(dir_path):
             for file_name in files:
                 file_path = Path(root) / file_name
+                if file_path.name == "flag.txt":
+                    continue
                 try:
                     with open(file_path, 'r', encoding='utf-8') as file:
                         file_contents[str(file_path)] = file.read()
